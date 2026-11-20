@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sailor Inventory</title>
+<meta name="theme-color" content="#C8102E">
+<meta name="description" content="Sailor by Epyllion - outlet stock verification scanner">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icons/logo.svg">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Sailor Inventory">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="hdr">
+  <img src="icons/logo.svg" alt="" class="logo">
+  <div class="ht"><b>Sailor Inventory</b><span id="hdrSub">Stock verification</span></div>
+</header>
+<div id="banner" class="banner" hidden></div>
+<main id="view"></main>
+<nav id="nav" class="nav"></nav>
+<div id="toast" class="toast"></div>
+<div id="modal" class="modal" hidden></div>
+<div id="lock" class="lock" hidden></div>
+<script src="js/lib/zxing-reader.js"></script>
+<script src="js/core.js"></script>
+<script src="js/stockparse.js"></script>
+<script src="js/report.js"></script>
+<script src="js/scanner.js"></script>
+<script src="js/publisher.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

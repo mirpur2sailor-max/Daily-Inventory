@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E5233B"/><stop offset="1" stop-color="#A50C23"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#g)"/>
+  <!-- scan frame -->
+  <g fill="none" stroke="#fff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" opacity=".95">
+    <path d="M118 190v-52a20 20 0 0 1 20-20h52"/><path d="M322 118h52a20 20 0 0 1 20 20v52"/>
+    <path d="M394 322v52a20 20 0 0 1-20 20h-52"/><path d="M190 394h-52a20 20 0 0 1-20-20v-52"/>
+  </g>
+  <!-- anchor -->
+  <g fill="none" stroke="#fff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="178" r="21"/>
+    <path d="M256 199v170"/>
+    <path d="M222 235h68"/>
+    <path d="M186 306c4 38 30 63 70 63s66-25 70-63"/>
+    <path d="M170 322l16-16 16 16M310 322l16-16 16 16"/>
+  </g>
+  <!-- navy wave accent -->
+  <path d="M118 434c28-18 52-18 69 0 17 18 41 18 69 0s52-18 69 0 41 18 69 0" fill="none" stroke="#14284B" stroke-width="14" stroke-linecap="round" opacity=".9"/>
+</svg>
