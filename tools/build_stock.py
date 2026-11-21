@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Convert the outlet stock report (xlsx) into data/stock.json + data/meta.json.
+"""Convert the outlet stock report (xlsx) into the encrypted data/stock.dat.
 Mirrors js/stockparse.js exactly (used by the GitHub Action and for local checks).
 
-Usage: python tools/build_stock.py data/source/Stock_Report.xlsx [--outlet Mirpur-2] [--out data] [--date YYYY-MM-DD]
+Usage: STOCK_CODE=... python tools/build_stock.py data/source/Stock_Report.xlsx [--outlet Mirpur-2] [--out data] [--date YYYY-MM-DD]
 """
 import argparse, json, os, re, sys
 from datetime import datetime, timezone
@@ -13,7 +13,7 @@ NA = 'N/A'
 HEAD = {
     'BARCODE': 'bc', 'MASTER CATEGORY': 'm', 'LABEL': 'lb', 'GENDER': 'g', 'CATEGORY': 'c',
     'STYLE CODE': 'st', 'A02': 'se', 'SEASON': 'se', 'COLOUR': 'co', 'COLOR': 'co', 'SIZE': 'sz',
-    'RCV QTY': 'rcv', 'SALE QTY': 'sale', 'BALANCE': 'q', 'CPU': 'cpu', 'MRP': 'mrp',
+    'RCV QTY': 'rcv', 'SALE QTY': 'sale', 'BALANCE': 'q', 'MRP': 'mrp',
 }
 REQUIRED = ['bc', 'g', 'm', 'c', 'se', 'sz', 'q']
 
@@ -42,11 +42,18 @@ def date_from_name(name):
     return f'{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}' if m else None
 
 
-def build(path, outlet, report_date):
+def build(path, outlet, report_date, published_at=None):
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb.worksheets[0]
-    it = ws.iter_rows(values_only=True)
-    header = list(next(it))
+    all_rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    hi = 0
+    for i, r in enumerate(all_rows[:15]):
+        keys = {HEAD.get(up(h)) for h in r}
+        if all(k in keys for k in REQUIRED):
+            hi = i
+            break
+    header = all_rows[hi]
+    it = iter(all_rows[hi + 1:])
     col = {}
     for i, h in enumerate(header):
         k = HEAD.get(up(h))
@@ -88,7 +95,7 @@ def build(path, outlet, report_date):
             stats['negativeClipped'] += 1
         rec = [text(r, 'g', 'OTHERS'), text(r, 'm', 'OTHERS'), cat, text(r, 'se', NA), size, text(r, 'lb', NA),
                text(r, 'st', ''), text(r, 'co', NA)]
-        tail = [max(0, num(get(r, 'mrp'))), max(0, num(get(r, 'cpu'))), num(get(r, 'rcv')), num(get(r, 'sale'))]
+        tail = [max(0, num(get(r, 'mrp'))), num(get(r, 'rcv')), num(get(r, 'sale'))]
         sig = '\x01'.join(rec) + '\x01' + str(q) + '\x01' + '\x01'.join(map(str, tail))
         if bc in seen:
             if seen[bc][0] == sig:
@@ -112,13 +119,29 @@ def build(path, outlet, report_date):
     pcs = sum(r[9] for r in out)
     mrp_value = sum(r[9] * r[10] for r in out)
     meta = {
-        'schema': 1, 'outlet': outlet,
+        'schema': 2, 'outlet': outlet,
         'reportDate': report_date or date_from_name(os.path.basename(path)),
-        'publishedAt': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z'),
+        'publishedAt': published_at or datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z'),
         'source': os.path.basename(path),
         'counts': {'skus': len(out), 'pcs': pcs, 'mrpValue': mrp_value},
     }
     return {'meta': meta, 'dict': D, 'rows': out}, meta, stats
+
+
+def encrypt(stock, code, iterations=150000):
+    """Same envelope as js/core.js Core.encrypt (PBKDF2-SHA256 -> AES-256-GCM)."""
+    import base64
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    salt, iv = os.urandom(16), os.urandom(12)
+    key = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=iterations).derive(code.encode('utf-8'))
+    raw = json.dumps(stock, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+    ct = AESGCM(key).encrypt(iv, raw, None)
+    b = lambda x: base64.b64encode(x).decode('ascii')
+    m = stock['meta']
+    return {'v': 1, 'updated': m['publishedAt'], 'label': 'Stock ' + (m.get('reportDate') or ''), 'outlet': m['outlet'],
+            'iter': iterations, 'salt': b(salt), 'iv': b(iv), 'data': b(ct)}
 
 
 if __name__ == '__main__':
@@ -127,11 +150,17 @@ if __name__ == '__main__':
     ap.add_argument('--outlet', default='Mirpur-2')
     ap.add_argument('--out', default='data')
     ap.add_argument('--date', default=None)
+    ap.add_argument('--published-at', default=None, help='ISO timestamp override (seeding only)')
+    ap.add_argument('--plain', default=None, help='(testing) also write unencrypted json here - never commit it')
+    ap.add_argument('--code', default=os.environ.get('STOCK_CODE'), help='access code (or env STOCK_CODE)')
     a = ap.parse_args()
-    stock, meta, stats = build(a.xlsx, a.outlet, a.date)
+    if not a.code:
+        sys.exit('Access code required: --code or STOCK_CODE')
+    stock, meta, stats = build(a.xlsx, a.outlet, a.date, a.published_at)
     os.makedirs(a.out, exist_ok=True)
-    with open(os.path.join(a.out, 'stock.json'), 'w', encoding='utf-8') as f:
-        json.dump(stock, f, separators=(',', ':'), ensure_ascii=False)
-    with open(os.path.join(a.out, 'meta.json'), 'w', encoding='utf-8') as f:
-        json.dump(meta, f, separators=(',', ':'), ensure_ascii=False)
+    with open(os.path.join(a.out, 'stock.dat'), 'w', encoding='utf-8') as f:
+        json.dump(encrypt(stock, a.code), f, separators=(',', ':'))
+    if a.plain:
+        with open(a.plain, 'w', encoding='utf-8') as f:
+            json.dump(stock, f, separators=(',', ':'), ensure_ascii=False)
     print(json.dumps({'meta': meta, 'stats': stats}, indent=2))

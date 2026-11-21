@@ -24,7 +24,7 @@
   var HEAD = {
     'BARCODE': 'bc', 'MASTER CATEGORY': 'm', 'LABEL': 'lb', 'GENDER': 'g', 'CATEGORY': 'c',
     'STYLE CODE': 'st', 'A02': 'se', 'SEASON': 'se', 'COLOUR': 'co', 'COLOR': 'co', 'SIZE': 'sz',
-    'RCV QTY': 'rcv', 'SALE QTY': 'sale', 'BALANCE': 'q', 'CPU': 'cpu', 'MRP': 'mrp'
+    'RCV QTY': 'rcv', 'SALE QTY': 'sale', 'BALANCE': 'q', 'MRP': 'mrp'
   };
   var REQUIRED = ['bc', 'g', 'm', 'c', 'se', 'sz', 'q'];
   var REQ_NAMES = { bc: 'BARCODE', g: 'GENDER', m: 'MASTER CATEGORY', c: 'CATEGORY', se: 'A02 (Season)', sz: 'Size', q: 'BALANCE' };
@@ -68,7 +68,7 @@
         text(r, 'g', 'OTHERS'), text(r, 'm', 'OTHERS'), cat, text(r, 'se', NA), size, text(r, 'lb', NA),
         text(r, 'st', ''), text(r, 'co', NA)
       ];
-      var tail = [Math.max(0, num(get(r, 'mrp'))), Math.max(0, num(get(r, 'cpu'))), num(get(r, 'rcv')), num(get(r, 'sale'))];
+      var tail = [Math.max(0, num(get(r, 'mrp'))), num(get(r, 'rcv')), num(get(r, 'sale'))];
       var sig = rec.join('\u0001') + '\u0001' + q + '\u0001' + tail.join('\u0001');
       if (Object.prototype.hasOwnProperty.call(seen, bc)) {
         var prev = seen[bc];
@@ -80,7 +80,7 @@
       out.push(row);
     });
 
-    // dictionary-encode  (row layout: bc,g,m,c,se,sz,lb,st,co,q,mrp,cpu,rcv,sale)
+    // dictionary-encode  (row layout v2: bc,g,m,c,se,sz,lb,st,co,q,mrp,rcv,sale  - cost price is never stored)
     var idxCols = { 1: 'g', 2: 'm', 3: 'c', 4: 'se', 5: 'sz', 6: 'lb', 8: 'co' };
     Object.keys(idxCols).forEach(function (p) {
       var k = idxCols[p], set = {};
@@ -95,7 +95,7 @@
     out.forEach(function (r) { pcs += r[9]; mrpValue += r[9] * r[10]; });
 
     var meta = {
-      schema: 1,
+      schema: 2,
       outlet: opts.outlet || 'Mirpur-2',
       reportDate: opts.reportDate || dateFromName(opts.fileName) || null,
       publishedAt: opts.publishedAt || new Date().toISOString(),
@@ -105,19 +105,29 @@
     return { stock: { meta: meta, dict: D, rows: out }, meta: meta, stats: stats };
   }
 
+  function headerIndex(all) {
+    for (var i = 0; i < Math.min(all.length, 15); i++) {
+      var keys = {};
+      (all[i] || []).forEach(function (h) { var k = HEAD[up(h)]; if (k) keys[k] = 1; });
+      if (REQUIRED.every(function (k) { return keys[k]; })) return i;
+    }
+    return 0;
+  }
+
   async function parseWorkbook(ExcelJS, buffer, opts) {
     var wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buffer);
     var ws = wb.worksheets[0];
     if (!ws) throw new Error('No worksheet found');
-    var header = [], rows = [];
-    ws.eachRow({ includeEmpty: false }, function (row, n) {
+    var all = [];
+    ws.eachRow({ includeEmpty: false }, function (row) {
       var vals = row.values; // 1-based sparse
       var arr = new Array(Math.max(vals.length - 1, 0));
       for (var i = 1; i < vals.length; i++) arr[i - 1] = vals[i];
-      if (!header.length) header = arr; else rows.push(arr);
+      all.push(arr);
     });
-    return build(header, rows, opts);
+    var h = headerIndex(all);
+    return build(all[h] || [], all.slice(h + 1), opts);
   }
 
   var api = { build: build, parseWorkbook: parseWorkbook, dateFromName: dateFromName, NA: NA };

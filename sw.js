@@ -1,10 +1,10 @@
 /* Service worker: app shell cached for offline; stock data always network-first. */
-const VERSION = 'si-v1.0.0';
+const VERSION = 'si-v2.0.0';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/core.js', 'js/stockparse.js', 'js/report.js', 'js/scanner.js', 'js/publisher.js', 'js/app.js',
   'js/lib/zxing-reader.js', 'js/lib/zxing_reader.wasm', 'js/lib/exceljs.min.js',
-  'icons/logo.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'
+  'icons/logo.svg', 'icons/sailor-wordmark.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'
 ];
 
 self.addEventListener('install', e => {

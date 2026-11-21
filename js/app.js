@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = Core, t = C.t, esc = C.esc, fmt = C.fmt, DB = C.DB, Sound = C.Sound;
-  const VERSION = '1.0.0';
+  const VERSION = '2.0.0';
   const SALT = 'sailor-inv-v1';
   const PW_HASH = '79d3f2fc8ab27f74af78afb1b020de0d2e64e13ce7a7d577105c57f18db35918';
   const UNLOCK_MS = 12 * 3600 * 1000;
@@ -15,8 +15,9 @@
   const state = {
     tab: 'home', dict: null, items: [], bb: new Map(), meta: null, stock: null, pending: null,
     sel: { g: new Set(), m: new Set(), c: new Set(), se: new Set(), sz: new Set() },
-    agg: null, itemByBc: {}
+    agg: null, itemByBc: {}, sibs: new Map(), loading: true
   };
+  let deferredInstall = null;
   let S = null;            // active session
   let flag = null;         // Uint8Array in-scope flags
   let CNT = { expected: 0, scanned: 0, matched: 0, short: 0, excess: 0 };
@@ -34,14 +35,14 @@
     const el = $('#lock');
     el.hidden = false;
     el.innerHTML = `<form class="lockbox" id="lockform" autocomplete="off">
-      <img src="icons/logo.svg" alt="" class="lockicon"><h1>${t('app')}</h1><p>${t('enter_password')}</p>
+      <img src="icons/sailor-wordmark.png" alt="Sailor" class="wordmark"><h1>${t('app')}</h1><p>${t('enter_password')}</p>
       <input id="lockpw" type="password" placeholder="${t('password')}" autocomplete="current-password" autofocus>
       <div class="err" id="lockerr"></div><button class="btn" type="submit">${t('unlock')}</button>
       <div class="langrow"><button type="button" data-act="lang" data-v="en" class="${settings.lang === 'en' ? 'on' : ''}">English</button><button type="button" data-act="lang" data-v="bn" class="${settings.lang === 'bn' ? 'on' : ''}">বাংলা</button></div></form>`;
     $('#lockform').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const h = await C.sha256(SALT + $('#lockpw').value);
-      if (h === PW_HASH) { try { localStorage.setItem('si.unlock', String(Date.now())); } catch (x) { /* ignore */ } el.hidden = true; el.innerHTML = ''; Sound.init(); start(); }
+      const pwv = $('#lockpw').value, h = await C.sha256(SALT + pwv);
+      if (h === PW_HASH) { try { localStorage.setItem('si.unlock', String(Date.now())); localStorage.setItem('si.code', pwv); } catch (x) { /* ignore */ } el.hidden = true; el.innerHTML = ''; Sound.init(); start(); }
       else { $('#lockerr').textContent = t('wrong_password'); $('#lockpw').value = ''; }
     });
   }
@@ -61,10 +62,13 @@
   /* ================= stock data ================= */
   function applyStock(stock) {
     state.stock = stock; state.meta = stock.meta; state.dict = stock.dict;
-    const D = stock.dict;
-    state.items = stock.rows.map(r => ({ bc: r[0], g: r[1], m: r[2], c: r[3], se: r[4], sz: r[5], lb: r[6], st: r[7], co: r[8], q: r[9], mrp: r[10], cpu: r[11], rcv: r[12], sale: r[13] }));
-    state.bb = new Map(); state.itemByBc = {};
-    state.items.forEach((it, i) => { state.bb.set(it.bc, i); state.itemByBc[it.bc] = it; });
+    const D = stock.dict, o = (stock.meta && stock.meta.schema >= 2) ? 0 : 1; // schema 1 carried a cost column, now ignored
+    state.items = stock.rows.map(r => ({ bc: r[0], g: r[1], m: r[2], c: r[3], se: r[4], sz: r[5], lb: r[6], st: r[7], co: r[8], q: r[9], mrp: r[10], rcv: r[11 + o], sale: r[12 + o] }));
+    state.bb = new Map(); state.itemByBc = {}; state.sibs = new Map();
+    state.items.forEach((it, i) => {
+      state.bb.set(it.bc, i); state.itemByBc[it.bc] = it;
+      const k = it.st + '|' + it.co; let a = state.sibs.get(k); if (!a) state.sibs.set(k, a = []); a.push(i);
+    });
     // aggregates for Home
     const g = {}, m = {};
     state.items.forEach(it => {
@@ -76,24 +80,48 @@
     DIMS.forEach(d => state.sel[d].clear());
   }
 
+  const getCode = () => { try { return localStorage.getItem('si.code') || ''; } catch (e) { return ''; } };
+
   async function loadStock() {
     try { const cached = await DB.get('stock'); if (cached && cached.rows) applyStock(cached); } catch (e) { /* ignore */ }
     await checkUpdate(false);
-    if (!state.items.length) {
-      try { const r = await fetch('data/stock.json', { cache: 'no-cache' }); if (r.ok) { const s = await r.json(); applyStock(s); DB.set('stock', s); } } catch (e) { /* offline */ }
-    }
+    state.loading = false;
   }
 
+  let syncing = false;
   async function checkUpdate(manual) {
+    if (syncing) return; syncing = true;
     try {
-      const r = await fetch('data/meta.json?t=' + Date.now(), { cache: 'no-store' });
-      if (!r.ok) throw new Error('meta ' + r.status);
-      const meta = await r.json();
-      if (state.meta && state.meta.publishedAt === meta.publishedAt) { if (manual) toast(t('up_to_date')); return; }
-      const sr = await fetch('data/stock.json?v=' + encodeURIComponent(meta.publishedAt), { cache: 'no-cache' });
-      if (!sr.ok) throw new Error('stock ' + sr.status);
-      handleNewStock(await sr.json());
+      let env = null, status = 0;
+      try { const r = await fetch('data/stock.dat', { cache: 'no-cache' }); status = r.status; if (r.ok) { const j = await r.json(); if (j && j.data) env = j; } } catch (e) { status = -1; }
+      if (env) {   // encrypted stock data (current format)
+        if (state.meta && state.meta.publishedAt >= env.updated) { if (manual) toast(t('up_to_date')); return; }
+        let stock; try { stock = await C.decryptEnv(env, getCode()); } catch (e) { if (!S) askCode(env); return; }
+        handleNewStock(stock); return;
+      }
+      if (status === 404) {   // older unencrypted files, kept only as a fallback
+        const r = await fetch('data/meta.json?t=' + Date.now(), { cache: 'no-store' });
+        if (r.ok) {
+          const meta = await r.json();
+          if (state.meta && state.meta.publishedAt >= meta.publishedAt) { if (manual) toast(t('up_to_date')); return; }
+          const sr = await fetch('data/stock.json?v=' + encodeURIComponent(meta.publishedAt), { cache: 'no-cache' });
+          if (sr.ok) { handleNewStock(await sr.json()); return; }
+        }
+      }
+      if (manual) toast(t('update_failed'), 'bad');
     } catch (e) { if (manual) toast(t('update_failed'), 'bad'); }
+    finally { syncing = false; }
+  }
+
+  function askCode(env) {
+    openModal(`<form id="codeform"><h3>${t('code_title')}</h3><p class="muted small">${t('code_open')}</p>
+      <input id="codein" type="password" placeholder="${t('code_ph')}" autocomplete="off"><div class="err" id="codeerr"></div>
+      <div class="btnrow"><button class="btn" type="submit">${t('ok')}</button></div></form>`);
+    $('#codeform').addEventListener('submit', async e => {
+      e.preventDefault(); const c = $('#codein').value.trim(); if (!c) return;
+      try { const stock = await C.decryptEnv(env, c); try { localStorage.setItem('si.code', c); } catch (x) { /* ignore */ } closeModal(); handleNewStock(stock); }
+      catch (x) { $('#codeerr').textContent = t('code_bad'); }
+    });
   }
 
   function handleNewStock(stock) {
@@ -167,6 +195,7 @@
     const scope = computeScope(); if (!scope.length) { toast(t('empty_scope'), 'bad'); return; }
     Sound.init();
     S = { id: 'S' + Date.now(), createdAt: Date.now(), staff: name, filters: selNames(), scope, counts: {}, wrong: {}, out: {}, log: [], status: 'active' };
+    recentTouch(S.filters, null);
     initRuntime(); persistNow(); lastRes = null; listTab = 'missing'; listQuery = ''; listPage = 1; render();
   }
 
@@ -214,6 +243,31 @@
     }
   }
 
+  async function scanPhoto(file) {
+    if (!S) return;
+    toast(t('photo_reading'));
+    try {
+      ensureScanner(); Sound.init();
+      const txt = await scanner.readFile(file), bc = normBc(txt);
+      if (bc) register(bc, 'PHOTO'); else toast(t('photo_none'), 'bad');
+    } catch (e) { toast(t('photo_none'), 'bad'); }
+  }
+  function listText() {
+    const D = state.dict, lines = [];
+    if (listTab === 'missing' || listTab === 'excess') {
+      const miss = listTab === 'missing', rows = [];
+      S.scope.forEach(i => { const it = state.items[i], c = S.counts[it.bc] || 0, v = miss ? it.q - c : c - it.q; if (v > 0) rows.push({ it, v }); });
+      rows.sort((a, b) => a.it.st.localeCompare(b.it.st) || C.sizeRank(D.sz[a.it.sz]) - C.sizeRank(D.sz[b.it.sz]));
+      lines.push((miss ? 'MISSING' : 'EXCESS') + ' - ' + selSummary(S.filters) + ' (' + S.staff + ')');
+      rows.forEach(r => lines.push(r.it.st + ' | ' + D.co[r.it.co] + ' | ' + D.sz[r.it.sz] + ' | ' + r.v + ' pc | ' + r.it.bc));
+    } else {
+      const src = listTab === 'wrong' ? S.wrong : S.out;
+      lines.push((listTab === 'wrong' ? 'WRONG BARCODES' : 'OTHER SECTION') + ' - ' + selSummary(S.filters));
+      Object.keys(src).forEach(bc => { const it = state.itemByBc[bc]; lines.push(bc + (it ? ' | ' + it.st + ' | ' + D.sz[it.sz] : '') + ' | x' + src[bc].n); });
+    }
+    return lines.join('\n');
+  }
+
   function register(bc, method) {
     if (!S) return;
     lastRes = recordScan(bc, method);
@@ -232,20 +286,28 @@
   }
 
   /* ================= camera ================= */
+  function ensureScanner() {
+    if (!scanner) scanner = new Scanner({ video: $('#vid'), cam: $('.cam'), frame: $('.guide i'), onCode: onDetect });
+    else { scanner.V = $('#vid'); scanner.CAM = $('.cam'); scanner.FR = $('.guide i'); }
+    return scanner;
+  }
+  function camError(e) {
+    const n = e && e.name;
+    return n === 'NotAllowedError' ? t('cam_denied') : n === 'NotFoundError' ? t('cam_none') : n === 'NotReadableError' ? t('cam_busy') : n === 'Unsupported' ? t('cam_unsupported') : t('camera_error');
+  }
+  function camButtons() {
+    if (!scanner) return;
+    $('#btnTorch').hidden = !scanner.hasTorch(); $('#btnZoom').hidden = !scanner.hasZoom(); $('#btnZoom').textContent = '1×'; $('#btnCam').hidden = !scanner.hasMultiCam();
+    $('#btnTorch').classList.remove('on'); $('#camInfo').textContent = scanner.info();
+  }
   async function startCamera() {
     const msg = $('#camMsg'); if (!msg) return;
-    msg.className = 'cammsg'; msg.textContent = '';
+    ensureScanner(); msg.className = 'cammsg'; msg.textContent = t('cam_starting');
     try {
-      if (!scanner) scanner = new Scanner($('#vid'), null, onDetect);
-      else { scanner.video = $('#vid'); }
-      await scanner.start(settings.camera || '');
-      paused = false; msg.textContent = ''; msg.className = 'cammsg hide';
-      $('#btnTorch').hidden = !scanner.hasTorch();
-      const z = scanner.zoomRange(), zs = $('#zoom');
-      if (z && zs) { zs.hidden = false; zs.min = z.min; zs.max = Math.min(z.max, z.min + 4); zs.step = z.step; zs.value = z.min; }
-      requestWake();
+      Sound.init(); await scanner.start();
+      paused = false; msg.className = 'cammsg hide'; msg.textContent = ''; $('#btnPause').textContent = '⏸'; camButtons(); requestWake();
     } catch (e) {
-      msg.className = 'cammsg err'; msg.innerHTML = `${t('camera_error')}<br><small>${esc(e.message || e.name || '')}</small><br><button class="btn small" data-act="retryCam">${t('retry')}</button>`;
+      msg.className = 'cammsg err'; msg.innerHTML = `${esc(camError(e))}<br><button class="btn small" data-act="retryCam">${t('retry')}</button>`;
     }
   }
   function stopCamera() { if (scanner) scanner.stop(); releaseWake(); }
@@ -282,14 +344,37 @@
 
   function bar(p, cls) { return `<div class="bar ${cls || ''}"><i style="width:${Math.max(0, Math.min(100, p))}%"></i></div>`; }
 
+  /* ================= recent sections ================= */
+  const RKEY = 'si.recent';
+  function recentGet() { try { return JSON.parse(localStorage.getItem(RKEY) || '[]'); } catch (e) { return []; } }
+  function recentSave(a) { try { localStorage.setItem(RKEY, JSON.stringify(a.slice(0, 6))); } catch (e) { /* ignore */ } }
+  function recentTouch(filters, acc) {
+    const k = JSON.stringify(filters), a = recentGet().filter(x => x.k !== k), old = recentGet().find(x => x.k === k);
+    a.unshift({ k, filters, t: Date.now(), acc: acc == null ? (old ? old.acc : null) : acc }); recentSave(a);
+  }
+  function ago(ts) {
+    const m = Math.round((Date.now() - ts) / 60000);
+    if (m < 2) return 'now'; if (m < 60) return m + ' min'; const h = Math.round(m / 60); if (h < 24) return h + ' h'; return Math.round(h / 24) + ' d';
+  }
+  function recentHTML() {
+    const a = recentGet(); if (!a.length || !state.items.length) return '';
+    return `<div class="card"><h3>${t('recent')}</h3><p class="muted small" style="margin-top:-6px">${t('recent_hint')}</p>` + a.map((x, i) => `<button class="rec" data-act="recent" data-i="${i}"><span class="rt"><b>${esc(selSummary(x.filters))}</b><small>${ago(x.t)}${x.acc != null ? ' · ' + t('last_acc') + ' ' + (x.acc * 100).toFixed(1) + '%' : ''}</small></span><span class="chev">›</span></button>`).join('') + '</div>';
+  }
+  function startFromRecent(i) {
+    const x = recentGet()[i]; if (!x) return;
+    DIMS.forEach(d => { state.sel[d] = new Set((x.filters[d] || []).map(n => state.dict[d].indexOf(n)).filter(j => j >= 0)); });
+    state.tab = 'scan'; render();
+    if (settings.staff) startSession(); else toast(t('need_name'), 'bad');
+  }
+
   function viewHome() {
-    if (!state.items.length) return `<div class="card muted">${t('no_data')}</div>`;
+    if (!state.items.length) return `<div class="card muted">${state.loading ? t('data_loading') : t('no_data')}</div>`;
     const m = state.meta, c = m.counts, D = state.dict;
     let h = '';
     if (S) {
       const pct = CNT.expected ? Math.round(CNT.matched * 100 / CNT.expected) : 0;
       h += `<div class="card resume"><div><b>${t('resume_hint')}</b><div class="muted small">${esc(selSummary(S.filters))} · ${esc(S.staff)}</div>${bar(pct)}<div class="small">${fmt(CNT.matched)} / ${fmt(CNT.expected)} ${t('pcs')}</div></div><button class="btn" data-act="tab" data-v="scan">${t('resume_scan')}</button></div>`;
-    } else h += `<button class="btn big" data-act="tab" data-v="scan">${t('start_scan')}</button>`;
+    } else h += `<button class="btn big" data-act="tab" data-v="scan">${t('start_scan')}</button>` + recentHTML();
     h += `<div class="kpis"><div class="kpi"><b>${fmt(c.skus)}</b><span>${t('skus')}</span></div><div class="kpi"><b>${fmt(c.pcs)}</b><span>${t('pcs')}</span></div><div class="kpi"><b>${C.fmtMoney(c.mrpValue)}</b><span>${t('value_mrp')}</span></div></div>`;
     const gs = Object.keys(state.agg.g).sort((a, b) => state.agg.g[b].pcs - state.agg.g[a].pcs);
     h += `<div class="card"><h3>${t('by_gender')}</h3>` + gs.map(k => { const a = state.agg.g[k]; return `<div class="brow"><span>${esc(k)}</span>${bar(a.pcs * 100 / c.pcs)}<b>${fmt(a.pcs)}</b></div>`; }).join('') + '</div>';
@@ -305,9 +390,9 @@
   }
 
   function viewSetup() {
-    if (!state.items.length) return `<div class="card muted">${t('no_data')}</div>`;
+    if (!state.items.length) return `<div class="card muted">${state.loading ? t('data_loading') : t('no_data')}</div>`;
     const scope = computeScope(); let pcs = 0, val = 0; scope.forEach(i => { const it = state.items[i]; pcs += it.q; val += it.q * it.mrp; });
-    let h = `<div class="card"><h3>${t('choose_section')}</h3><label>${t('your_name')}<input id="staff" value="${esc(settings.staff)}" placeholder="${t('your_name_ph')}" autocomplete="name"></label></div><div class="card dims">`;
+    let h = recentHTML() + `<div class="card"><h3>${t('choose_section')}</h3><label>${t('your_name')}<input id="staff" value="${esc(settings.staff)}" placeholder="${t('your_name_ph')}" autocomplete="name"></label></div><div class="card dims">`;
     DIMS.forEach(d => {
       const names = [...state.sel[d]].map(i => state.dict[d][i]);
       h += `<button class="dim" data-act="openDim" data-dim="${d}"><span class="dl">${t(DIM_LABEL[d])}</span><span class="dv">${names.length ? esc(names.slice(0, 3).join(', ')) + (names.length > 3 ? ' +' + (names.length - 3) : '') : '<i>' + t('all') + '</i>'}</span><span class="chev">›</span></button>`;
@@ -341,8 +426,9 @@
     return `<div class="scanwrap">
       <div class="scanhead"><div class="sel">${esc(selSummary(S.filters))}</div><button class="lnk" data-act="undo">${t('undo')}</button><button class="lnk bad" data-act="discard">${t('discard')}</button></div>
       <div class="cam"><video id="vid" playsinline muted></video><div class="guide"><i></i></div>
-        <div class="camtools"><button id="btnTorch" data-act="torch" hidden>${t('torch')}</button><button data-act="pause" id="btnPause">${t('pause')}</button></div>
-        <input id="zoom" type="range" hidden><div class="cammsg" id="camMsg"></div></div>
+        <div class="camtools"><button id="btnTorch" data-act="torch" aria-label="${t('torch')}" hidden>💡</button><button id="btnZoom" data-act="zoom" hidden>1×</button><button id="btnCam" data-act="camSwitch" aria-label="Camera" hidden>⟳</button><button data-act="camToggle" id="btnPause" aria-label="${t('pause')}">⏸</button></div>
+        <div class="cammsg" id="camMsg"></div></div>
+      <div class="camrow"><span class="muted small" id="camInfo"></span><label class="btn ghost small photobtn">📷 ${t('photo')}<input type="file" id="photoIn" accept="image/*" capture="environment" hidden></label></div>
       <div id="stats"></div><div id="last"></div>
       <form id="manual" class="manual"><input id="manualIn" placeholder="${t('manual_ph')}" autocomplete="off" autocapitalize="characters"><button class="btn small" type="submit">${t('add')}</button></form>
       <div class="tabs" id="stabs"></div><div id="slist"></div></div>
@@ -362,10 +448,15 @@
     let lh = `<div class="last idle">${t('scan_ready')}</div>`;
     if (L) {
       const it = L.it, D = state.dict;
-      const head = it ? `<b>${esc(it.st)}</b><span>${esc(D.co[it.co])} · ${esc(D.sz[it.sz])}</span>` : `<b>${esc(L.bc)}</b>`;
+      const head = it ? `<div class="lt"><b>${esc(it.st)}</b><span>${esc(D.co[it.co])} · ${esc(D.sz[it.sz])}</span></div>` : `<div class="lt"><b>${esc(L.bc)}</b></div>`;
       const cls = L.r === 'OK' ? 'ok' : L.r === 'EXCESS' ? 'warn' : 'bad';
       const msg = L.r === 'OK' ? `${t('ok_scan')}  ${L.count} / ${it.q}` : L.r === 'EXCESS' ? `${t('excess_scan')}  ${L.count} / ${it.q}` : L.r === 'OUT' ? `${t('out_scan')}` : t('wrong_scan');
-      lh = `<div class="last ${cls}">${head}<code>${esc(L.bc)}</code><em>${msg}</em></div>`;
+      let chips = '';
+      if (it) {
+        const sibs = (state.sibs.get(it.st + '|' + it.co) || []).map(i => state.items[i]).sort((a, b) => C.sizeRank(D.sz[a.sz]) - C.sizeRank(D.sz[b.sz]));
+        if (sibs.length > 1) chips = `<div class="szl">${t('sizes_of')}</div><div class="szs">` + sibs.map(x => { const ins = flag[state.bb.get(x.bc)], c = S.counts[x.bc] || 0; return `<i class="${x.bc === it.bc ? 'cur' : ''}">${esc(D.sz[x.sz])} <b>${ins ? c + '/' + x.q : x.q}</b></i>`; }).join('') + '</div>';
+      }
+      lh = `<div class="last ${cls}"><div class="lhead">${head}${it ? `<button class="cpy" data-act="copy" data-v="${esc(it.st)}" aria-label="${t('copy_style')}">⎘</button>` : ''}</div><code>${esc(L.bc)}</code><em>${msg}</em>${chips}</div>`;
     }
     $('#last').innerHTML = lh;
     const tabs = [['missing', 'missing'], ['excess', 'excess'], ['wrong', 'wrong'], ['other', 'rejected']];
@@ -386,12 +477,12 @@
       });
       rows.sort((a, b) => a.it.st.localeCompare(b.it.st) || C.sizeRank(D.sz[a.it.sz]) - C.sizeRank(D.sz[b.it.sz]));
       total = rows.length;
-      h = (total > 8 || q ? `<input class="search" id="lq" placeholder="${t('search')}" value="${esc(listQuery)}">` : '') +
+      h = (total ? `<div class="listbar"><span class="muted small">${fmt(total)} ${t('skus')}</span><button class="mini" data-act="copyList">${t('copy_list')}</button></div>` : '') + (total > 8 || q ? `<input class="search" id="lq" placeholder="${t('search')}" value="${esc(listQuery)}">` : '') +
         (total ? rows.slice(0, LIM).map(r => `<div class="row"><div class="rmain"><b>${esc(r.it.st)}</b><span>${esc(D.co[r.it.co])} · ${esc(D.sz[r.it.sz])} · MRP ${fmt(r.it.mrp)}</span><code>${r.it.bc}</code></div><div class="rside"><span class="badge ${miss ? 'bad' : 'warn'}">${miss ? t('need') : t('excess')} ${r.v}</span><span class="small muted">${t('have')} ${r.c}/${r.it.q}</span>${miss ? `<button class="mini" data-act="plus" data-bc="${r.it.bc}">${t('found_manual')}</button>` : `<button class="mini" data-act="minus" data-bc="${r.it.bc}">${t('remove_one')}</button>`}</div></div>`).join('') : `<div class="muted center pad">${miss ? t('nothing_missing') : t('nothing_here')}</div>`);
     } else {
       const src = listTab === 'wrong' ? S.wrong : S.out;
       const keys = Object.keys(src).sort((a, b) => src[b].n - src[a].n); total = keys.length;
-      h = total ? keys.slice(0, LIM).map(bc => { const it = state.itemByBc[bc]; return `<div class="row"><div class="rmain"><b>${it ? esc(it.st) : esc(bc)}</b><span>${it ? esc(D.g[it.g]) + ' · ' + esc(D.m[it.m]) + ' · ' + esc(D.sz[it.sz]) : t('wrong_scan')}</span><code>${bc}</code></div><div class="rside"><span class="badge bad">× ${src[bc].n}</span></div></div>`; }).join('') : `<div class="muted center pad">${t('nothing_here')}</div>`;
+      h = (total ? `<div class="listbar"><span class="muted small">${fmt(total)}</span><button class="mini" data-act="copyList">${t('copy_list')}</button></div>` : '') + (total ? keys.slice(0, LIM).map(bc => { const it = state.itemByBc[bc]; return `<div class="row"><div class="rmain"><b>${it ? esc(it.st) : esc(bc)}</b><span>${it ? esc(D.g[it.g]) + ' · ' + esc(D.m[it.m]) + ' · ' + esc(D.sz[it.sz]) : t('wrong_scan')}</span><code>${bc}</code></div><div class="rside"><span class="badge bad">× ${src[bc].n}</span></div></div>`; }).join('') : `<div class="muted center pad">${t('nothing_here')}</div>`);
     }
     if (total > LIM) h += `<button class="btn ghost" data-act="more">${t('show_more')} (${fmt(total - LIM)})</button>`;
     const el = $('#slist'), hadFocus = document.activeElement && document.activeElement.id === 'lq';
@@ -423,6 +514,7 @@
       if (!window.ExcelJS) await C.loadScript('js/lib/exceljs.min.js');
       const buf = await Report.buildReport(window.ExcelJS, { session: S, items: state.items, dict: state.dict, meta: state.meta, byBarcode: state.itemByBc });
       const name = Report.fileName(S, state.meta), bytes = new Uint8Array(buf), sum = summaryNumbers();
+      recentTouch(S.filters, sum.accuracy);
       await DB.set('f:' + S.id, bytes);
       await DB.set('h:' + S.id, { id: S.id, name, staff: S.staff, completedAt: S.completedAt, createdAt: S.createdAt, filters: S.filters, summary: sum, outlet: state.meta.outlet });
       await pruneHistory();
@@ -472,24 +564,23 @@
       <div class="btnrow"><button class="btn small" data-act="share" data-id="${r.id}">${t('share')}</button><button class="btn small ghost" data-act="dl" data-id="${r.id}">${t('download')}</button><button class="btn small ghost bad" data-act="delHist" data-id="${r.id}">${t('delete')}</button></div></div>`).join('') : `<div class="card muted center">${t('no_history')}</div>`;
   }
 
+  function installCard() {
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent), standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+    if (standalone) return '';
+    if (deferredInstall) return `<div class="card"><h3>${t('install')}</h3><p class="muted small">${t('install_hint')}</p><button class="btn" data-act="install">${t('install')}</button></div>`;
+    if (ios) return `<div class="card"><h3>${t('install')}</h3><p class="muted small">${t('install_ios')}</p></div>`;
+    return '';
+  }
   function viewSettings() {
-    const m = state.meta, devs = settings._devs || [];
+    const m = state.meta;
     return `<div class="card"><h3>${t('language')}</h3><div class="seg"><button data-act="lang" data-v="en" class="${settings.lang === 'en' ? 'on' : ''}">English</button><button data-act="lang" data-v="bn" class="${settings.lang === 'bn' ? 'on' : ''}">বাংলা</button></div>
       <label class="check"><input type="checkbox" data-act="setSound" ${settings.sound ? 'checked' : ''}> ${t('sound')}</label>
-      <label class="check"><input type="checkbox" data-act="setVib" ${settings.vibrate ? 'checked' : ''}> ${t('vibrate')}</label>
-      <label>${t('camera')}<select id="camSel" data-act="setCam"><option value="">${t('camera_auto')}</option>${devs.map(d => `<option value="${esc(d.id)}" ${d.id === settings.camera ? 'selected' : ''}>${esc(d.label)}</option>`).join('')}</select></label></div>
+      <label class="check"><input type="checkbox" data-act="setVib" ${settings.vibrate ? 'checked' : ''}> ${t('vibrate')}</label></div>
       <div class="card"><h3>${t('data')}</h3>${m ? `<div class="kvl"><span>${t('outlet')}</span><b>${esc(m.outlet)}</b><span>${t('stock_as_of')}</span><b>${C.fmtDate(m.reportDate)}</b><span>${t('skus')} / ${t('pcs')}</span><b>${fmt(m.counts.skus)} / ${fmt(m.counts.pcs)}</b><span>${t('published')}</span><b>${C.fmtDT(m.publishedAt)}</b></div>` : `<p class="muted">${t('no_data')}</p>`}
       <button class="btn ghost" data-act="checkUpdate">${t('check_update')}</button></div>
+      ${installCard()}
       <div class="card"><h3>${t('admin')}</h3><button class="btn" data-act="tab" data-v="publish">${t('publisher')}</button></div>
       <div class="card"><button class="btn ghost" data-act="lock">${t('lock_now')}</button> <button class="btn ghost bad" data-act="reset">${t('reset_local')}</button><p class="muted small">${t('version')} ${VERSION}</p></div>`;
-  }
-
-  async function listCameras() {
-    try {
-      const ds = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput' && d.label);
-      settings._devs = ds.map(d => ({ id: d.deviceId, label: d.label }));
-      const sel = $('#camSel'); if (sel && ds.length) sel.innerHTML = `<option value="">${t('camera_auto')}</option>` + settings._devs.map(d => `<option value="${esc(d.id)}" ${d.id === settings.camera ? 'selected' : ''}>${esc(d.label)}</option>`).join('');
-    } catch (e) { /* ignore */ }
   }
 
   /* ================= render ================= */
@@ -505,10 +596,10 @@
       else { unmountScan(); v.innerHTML = viewSetup(); }
     }
     else if (state.tab === 'history') { v.innerHTML = ''; viewHistory(v); }
-    else if (state.tab === 'settings') { v.innerHTML = viewSettings(); listCameras(); }
+    else if (state.tab === 'settings') { v.innerHTML = viewSettings(); }
     else if (state.tab === 'publish') {
       v.innerHTML = `<button class="lnk" data-act="tab" data-v="settings">‹ ${t('back')}</button><div id="pubroot"></div>`;
-      Publisher.mount($('#pubroot'), { meta: state.meta, items: state.items, onPublished: handleNewStock });
+      Publisher.mount($('#pubroot'), { meta: state.meta, items: state.items, code: getCode(), onPublished: handleNewStock });
     }
     v.scrollTop = 0; window.scrollTo(0, 0);
   }
@@ -528,9 +619,19 @@
     complete() { complete(); },
     undo() { undoLast(); },
     discard() { if (confirm(t('discard_q'))) { DB.del('session'); unmountScan(); S = null; flag = null; applyPending(); render(); } },
-    torch(el) { scanner && scanner.setTorch(!el.classList.contains('on')).then(() => el.classList.toggle('on')).catch(() => {}); },
-    pause(el) { if (!scanner) return; if (paused) { startCamera(); el.textContent = t('pause'); } else { paused = true; scanner.stop(); el.textContent = t('resume'); const m = $('#camMsg'); m.className = 'cammsg'; m.textContent = t('paused'); } },
+    torch(el) { if (!scanner) return; scanner.toggleTorch().then(on => el.classList.toggle('on', on)).catch(() => toast(t('torch_na'), 'bad')); },
+    zoom(el) { if (!scanner) return; scanner.cycleZoom().then(z => { el.textContent = z + '×'; }); },
+    camSwitch() { if (!scanner) return; scanner.nextCamera().then(l => { camButtons(); toast(l || t('cam_switch')); }).catch(e => { const m = $('#camMsg'); m.className = 'cammsg err'; m.innerHTML = `${esc(camError(e))}<br><button class="btn small" data-act="retryCam">${t('retry')}</button>`; }); },
+    camToggle(el) {
+      if (!scanner) return;
+      if (scanner.running) { scanner.stop(); paused = true; el.textContent = '▶'; const m = $('#camMsg'); m.className = 'cammsg'; m.innerHTML = `${t('cam_stopped')}<br><button class="btn small" data-act="retryCam">${t('cam_start')}</button>`; }
+      else startCamera();
+    },
     retryCam() { startCamera(); },
+    copy(el) { C.copyText(el.dataset.v).then(ok => ok && toast(t('copied') + ': ' + el.dataset.v, 'ok')); },
+    copyList() { C.copyText(listText()).then(ok => ok && toast(t('copied'), 'ok')); },
+    recent(el) { startFromRecent(Number(el.dataset.i)); },
+    install() { if (deferredInstall) { deferredInstall.prompt(); deferredInstall.userChoice.finally(() => { deferredInstall = null; render(); }); } },
     listTab(el) { listTab = el.dataset.v; listQuery = ''; listPage = 1; updateScanUI(); },
     more() { listPage++; renderList(); },
     plus(el) { register(el.dataset.bc, 'MANUAL'); },
@@ -540,7 +641,6 @@
     async delHist(el) { if (confirm(t('delete_q'))) { await DB.del('h:' + el.dataset.id); await DB.del('f:' + el.dataset.id); render(); } },
     setSound(el) { settings.sound = el.checked; saveSettings(); applySettings(); },
     setVib(el) { settings.vibrate = el.checked; saveSettings(); applySettings(); },
-    setCam(el) { settings.camera = el.value; saveSettings(); },
     checkUpdate() { checkUpdate(true); },
     lock() { try { localStorage.removeItem('si.unlock'); } catch (e) { /* ignore */ } location.reload(); },
     async reset() { if (confirm(t('reset_q'))) { await DB.clear(); try { localStorage.removeItem('si.settings'); } catch (e) { /* ignore */ } location.reload(); } }
@@ -557,8 +657,11 @@
   document.addEventListener('input', e => {
     if (e.target.id === 'staff') { settings.staff = e.target.value; saveSettings(); }
     if (e.target.id === 'lq') { listQuery = e.target.value; listPage = 1; renderList(); }
-    if (e.target.id === 'zoom' && scanner) scanner.setZoom(Number(e.target.value)).catch(() => {});
   });
+  document.addEventListener('change', e => {
+    if (e.target.id === 'photoIn') { const f = e.target.files[0]; e.target.value = ''; if (f) scanPhoto(f); }
+  });
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; if (state.tab === 'settings') render(); });
   document.addEventListener('submit', e => {
     if (e.target.id === 'manual') {
       e.preventDefault(); const i = $('#manualIn'), bc = normBc(i.value); i.value = '';

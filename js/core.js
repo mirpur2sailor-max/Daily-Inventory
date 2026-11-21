@@ -40,7 +40,23 @@
     pub_preview: 'Preview', pub_rows: 'SKUs', pub_dupes: 'duplicate rows ignored', pub_blank_cat: 'blank category', pub_blank_size: 'no size',
     pub_diff: 'Change vs live data', pub_added: 'new SKUs', pub_removed: 'removed SKUs', pub_pcs_delta: 'pcs change',
     pub_done: 'Published. Staff phones update within a few minutes.', pub_fail: 'Publish failed', pub_missing: 'Fill repository, token and choose a file',
-    pub_reading: 'Reading Excel...', pub_pushing: 'Uploading to GitHub...', back: 'Back', cancel: 'Cancel', ok: 'OK', offline: 'Offline'
+    pub_reading: 'Reading Excel...', pub_pushing: 'Uploading to GitHub...', back: 'Back', cancel: 'Cancel', ok: 'OK', offline: 'Offline',
+    recent: 'Recent sections', recent_hint: 'Tap to scan the same section again', again: 'Scan again', last_acc: 'last',
+    copy_list: 'Copy list', copied: 'Copied', copy_style: 'Copy style code',
+    photo: 'Scan from photo', photo_reading: 'Reading photo...', photo_none: 'No barcode found. Take the photo closer, in good light, barcode flat and sharp.',
+    cam_switch: 'Camera switched', cam_start: 'Start camera', cam_stopped: 'Camera stopped. Tap to scan again.', cam_starting: 'Starting camera...',
+    cam_denied: 'Camera permission was not given. Allow the camera for this site in the browser or phone settings, then try again.',
+    cam_none: 'No camera was found on this device.', cam_busy: 'Another app is using the camera. Close it and try again.', cam_unsupported: 'This browser cannot open the camera. Open the app link in Chrome (Android) or Safari (iPhone). You can still use Scan from photo or type the barcode.',
+    torch_na: 'Flashlight is not available on this phone', stop_cam: 'Stop',
+    sizes_of: 'Sizes of this colour', in_stock: 'in stock',
+    install: 'Install app', install_hint: 'Add Sailor Inventory to your home screen', install_ios: 'iPhone: tap Share, then Add to Home Screen',
+    code_title: 'Access code needed', code_bad: 'The access code did not work. Enter it again.', code_open: 'Enter the access code to open the stock data', code_ph: 'Access code',
+    data_loading: 'Loading stock data...', data_fail: 'Could not load the stock data. Check the internet connection.',
+    pub_code: 'Access code (staff password)', pub_code_hint: 'Stock data is encrypted with this code. Staff phones use the same code as their app password.',
+    pub_clean: 'Delete old unencrypted files (stock.json, meta.json) from GitHub', pub_local: 'Use on this phone only', pub_local_done: 'Loaded on this phone only.',
+    pub_dl: 'Download stock.dat', pub_dl_hint: 'Or upload the file yourself: GitHub > data folder > Add file > Upload files.',
+    pub_cleaned: 'Old unencrypted files removed.', pub_enc: 'Encrypting...', pub_code_need: 'Enter the access code',
+    today: 'Today', sessions_today: 'scans today', checking: 'Checking...'
   };
   var BN = {
     app: 'সেইলর ইনভেন্টরি', tagline: 'স্টক যাচাই', outlet: 'আউটলেট',
@@ -79,7 +95,23 @@
     pub_preview: 'প্রিভিউ', pub_rows: 'SKU', pub_dupes: 'ডুপ্লিকেট রো বাদ', pub_blank_cat: 'ক্যাটাগরি ফাঁকা', pub_blank_size: 'সাইজ নেই',
     pub_diff: 'বর্তমান ডাটার সাথে পরিবর্তন', pub_added: 'নতুন SKU', pub_removed: 'বাদ পড়া SKU', pub_pcs_delta: 'পিস পরিবর্তন',
     pub_done: 'পাবলিশ হয়েছে। কয়েক মিনিটের মধ্যে স্টাফদের ফোনে আপডেট হবে।', pub_fail: 'পাবলিশ ব্যর্থ', pub_missing: 'রিপোজিটরি, টোকেন ও ফাইল দিন',
-    pub_reading: 'Excel পড়া হচ্ছে...', pub_pushing: 'GitHub-এ আপলোড হচ্ছে...', back: 'পিছনে', cancel: 'বাতিল', ok: 'ঠিক আছে', offline: 'অফলাইন'
+    pub_reading: 'Excel পড়া হচ্ছে...', pub_pushing: 'GitHub-এ আপলোড হচ্ছে...', back: 'পিছনে', cancel: 'বাতিল', ok: 'ঠিক আছে', offline: 'অফলাইন',
+    recent: 'সাম্প্রতিক সেকশন', recent_hint: 'একই সেকশন আবার স্ক্যান করতে ট্যাপ করুন', again: 'আবার স্ক্যান', last_acc: 'সর্বশেষ',
+    copy_list: 'তালিকা কপি', copied: 'কপি হয়েছে', copy_style: 'স্টাইল কোড কপি',
+    photo: 'ছবি থেকে স্ক্যান', photo_reading: 'ছবি পড়া হচ্ছে...', photo_none: 'বারকোড পাওয়া যায়নি। কাছ থেকে, ভালো আলোতে, বারকোড সোজা ও পরিষ্কার রেখে ছবি তুলুন।',
+    cam_switch: 'ক্যামেরা বদলানো হয়েছে', cam_start: 'ক্যামেরা চালু', cam_stopped: 'ক্যামেরা বন্ধ। আবার স্ক্যান করতে ট্যাপ করুন।', cam_starting: 'ক্যামেরা চালু হচ্ছে...',
+    cam_denied: 'ক্যামেরার অনুমতি দেওয়া হয়নি। ব্রাউজার বা ফোনের সেটিংসে এই সাইটের জন্য ক্যামেরা Allow করে আবার চেষ্টা করুন।',
+    cam_none: 'এই ডিভাইসে কোনো ক্যামেরা পাওয়া যায়নি।', cam_busy: 'অন্য অ্যাপ ক্যামেরা ব্যবহার করছে। সেটি বন্ধ করে আবার চেষ্টা করুন।', cam_unsupported: 'এই ব্রাউজার ক্যামেরা খুলতে পারছে না। অ্যাপের লিংক Chrome (Android) বা Safari (iPhone)-এ খুলুন। ছবি থেকে স্ক্যান বা বারকোড টাইপ করা যাবে।',
+    torch_na: 'এই ফোনে ফ্ল্যাশলাইট নেই', stop_cam: 'বন্ধ',
+    sizes_of: 'এই কালারের সাইজ', in_stock: 'স্টকে',
+    install: 'অ্যাপ ইনস্টল', install_hint: 'সেইলর ইনভেন্টরি হোম স্ক্রিনে যোগ করুন', install_ios: 'iPhone: Share চেপে Add to Home Screen দিন',
+    code_title: 'অ্যাক্সেস কোড দরকার', code_bad: 'অ্যাক্সেস কোড মেলেনি। আবার দিন।', code_open: 'স্টক ডাটা খুলতে অ্যাক্সেস কোড দিন', code_ph: 'অ্যাক্সেস কোড',
+    data_loading: 'স্টক ডাটা লোড হচ্ছে...', data_fail: 'স্টক ডাটা লোড করা যায়নি। ইন্টারনেট সংযোগ দেখুন।',
+    pub_code: 'অ্যাক্সেস কোড (স্টাফ পাসওয়ার্ড)', pub_code_hint: 'স্টক ডাটা এই কোড দিয়ে এনক্রিপ্ট হয়। স্টাফের ফোনে অ্যাপ পাসওয়ার্ডই এই কোড।',
+    pub_clean: 'GitHub থেকে পুরোনো আনএনক্রিপ্টেড ফাইল (stock.json, meta.json) মুছুন', pub_local: 'শুধু এই ফোনে ব্যবহার করুন', pub_local_done: 'শুধু এই ফোনে লোড হয়েছে।',
+    pub_dl: 'stock.dat ডাউনলোড', pub_dl_hint: 'অথবা নিজে আপলোড করুন: GitHub > data ফোল্ডার > Add file > Upload files।',
+    pub_cleaned: 'পুরোনো আনএনক্রিপ্টেড ফাইল মোছা হয়েছে।', pub_enc: 'এনক্রিপ্ট হচ্ছে...', pub_code_need: 'অ্যাক্সেস কোড দিন',
+    today: 'আজ', sessions_today: 'টি স্ক্যান আজ', checking: 'চেক হচ্ছে...'
   };
   var LANGS = { en: EN, bn: BN };
   var lang = 'en';
@@ -158,6 +190,33 @@
     return btoa(bin);
   }
 
+
+  /* ---------- AES-GCM envelope (same format as tools/build_stock.py) ---------- */
+  function fromB64(s) { return Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); }); }
+  function toB64(u8) { var bin = '', CH = 0x8000; for (var i = 0; i < u8.length; i += CH) bin += String.fromCharCode.apply(null, u8.subarray(i, i + CH)); return btoa(bin); }
+  async function deriveKey(code, salt, iter, usage) {
+    var km = await crypto.subtle.importKey('raw', new TextEncoder().encode(code), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: salt, iterations: iter, hash: 'SHA-256' }, km, { name: 'AES-GCM', length: 256 }, false, usage);
+  }
+  async function decryptEnv(env, code) {
+    var key = await deriveKey(code, fromB64(env.salt), env.iter, ['decrypt']);
+    var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(env.iv) }, key, fromB64(env.data));
+    return JSON.parse(new TextDecoder().decode(pt));
+  }
+  async function encryptEnv(stock, code) {
+    var salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), iter = 150000;
+    var key = await deriveKey(code, salt, iter, ['encrypt']);
+    var ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, new TextEncoder().encode(JSON.stringify(stock)));
+    var m = stock.meta;
+    return { v: 1, updated: m.publishedAt, label: 'Stock ' + (m.reportDate || ''), outlet: m.outlet, iter: iter, salt: toB64(salt), iv: toB64(iv), data: toB64(new Uint8Array(ct)) };
+  }
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) {
+      var a = document.createElement('textarea'); a.value = text; a.style.position = 'fixed'; a.style.opacity = '0'; document.body.appendChild(a); a.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (x) { ok = false; } a.remove(); return ok;
+    }
+  }
+
   /* ---------- sound ---------- */
   var ac = null;
   var Sound = {
@@ -180,5 +239,5 @@
     }
   };
 
-  root.Core = { t: t, setLang: setLang, getLang: function () { return lang; }, DB: DB, esc: esc, fmt: fmt, fmtMoney: fmtMoney, fmtDate: fmtDate, fmtDT: fmtDT, sizeRank: sizeRank, loadScript: loadScript, sha256: sha256, b64: b64, Sound: Sound, EN: EN, BN: BN };
+  root.Core = { t: t, setLang: setLang, getLang: function () { return lang; }, DB: DB, esc: esc, fmt: fmt, fmtMoney: fmtMoney, fmtDate: fmtDate, fmtDT: fmtDT, sizeRank: sizeRank, loadScript: loadScript, sha256: sha256, b64: b64, decryptEnv: decryptEnv, encryptEnv: encryptEnv, copyText: copyText, Sound: Sound, EN: EN, BN: BN };
 })(window);
